@@ -10,7 +10,7 @@
   {
     "id": "emp1",
     "email": "maria@encom.es",
-    "name": "MarÃ­a GarcÃ­a",
+    "name": "María García",
     "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
     "role": "employee",
     "created_at": "2026-03-17T21:52:22.172Z"
@@ -18,7 +18,7 @@
   {
     "id": "emp2",
     "email": "carlos@encom.es",
-    "name": "Carlos LÃ³pez(¬
+    "name": "Carlos López",
     "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
     "role": "employee",
     "created_at": "2026-03-17T21:52:22.172Z"
@@ -26,7 +26,7 @@
   {
     "id": "emp3",
     "email": "ana@encom.es",
-    "name": "Ana MartÃ­nez",
+    "name": "Ana Martínez",
     "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
     "role": "employee",
     "created_at": "2026-03-17T21:52:22.172Z"
@@ -34,7 +34,7 @@
   {
     "id": "emp4",
     "email": "david@encom.es",
-    "name": "David SÃ¡nchez",
+    "name": "David Sánchez",
     "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
     "role": "employee",
     "created_at": "2026-03-17T21:52:22.172Z"
@@ -42,7 +42,7 @@
   {
     "id": "emp5",
     "email": "laura@encom.es",
-    "name": "Laura FernÃ¡ndez",
+    "name": "Laura Fernández",
     "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
     "role": "employee",
     "created_at": "2026-03-17T21:52:22.172Z"
@@ -50,7 +50,7 @@
   {
     "id": "emp6",
     "email": "pablo@encom.es",
-    "name": "Pablo RodrÃ­guez",
+    "name": "Pablo Rodríguez",
     "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
     "role": "employee",
     "created_at": "2026-03-17T21:52:22.172Z"

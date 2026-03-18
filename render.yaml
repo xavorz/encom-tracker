@@ -1,0 +1,31 @@
+# ── Encom Tracker — Render deployment config ──────────────────
+# OPCIÓN A (plan gratuito): sin disco persistente
+#   → Los datos se resetean en cada nuevo deploy
+#   → Válido para pruebas / demo
+#
+# OPCIÓN B (plan de pago, ~7$/mes): descomenta el bloque "disk:"
+#   → Los datos persisten entre deploys
+#   → Recomendado para uso real con el equipo
+
+services:
+  - type: web
+    name: encom-tracker
+    env: node
+    plan: free
+    buildCommand: echo "ok"
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      # Descomenta las siguientes 2 líneas si activas el disco (Opción B):
+      # - key: DATA_DIR
+      #   value: /var/data
+
+    # Opción B: descomenta para disco persistente (requiere plan de pago):
+    # disk:
+    #   name: encom-data
+    #   mountPath: /var/data
+    #   sizeGB: 1

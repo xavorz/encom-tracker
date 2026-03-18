@@ -1,1 +1,1152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Encom Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; }
+    .fade-in { animation: fadeIn .25s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    textarea { font-family: inherit; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
 
+<script type="text/babel">
+
+// ═══════════════════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════════════════
+const getToken = () => localStorage.getItem('enc_token');
+const getUser  = () => { try { return JSON.parse(localStorage.getItem('enc_user')); } catch { return null; } };
+const setAuth  = (t, u) => { localStorage.setItem('enc_token', t); localStorage.setItem('enc_user', JSON.stringify(u)); };
+const clearAuth = () => { localStorage.removeItem('enc_token'); localStorage.removeItem('enc_user'); };
+
+async function api(path, opts = {}) {
+  const token = getToken();
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+  return data;
+}
+
+function fmtWeek(ws) {
+  if (!ws) return '';
+  const d = new Date(ws + 'T12:00:00');
+  const end = new Date(d); end.setDate(end.getDate() + 4);
+  const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  if (d.getMonth() === end.getMonth()) return `${d.getDate()}–${end.getDate()} ${months[d.getMonth()]}`;
+  return `${d.getDate()} ${months[d.getMonth()]} – ${end.getDate()} ${months[end.getMonth()]}`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// SHARED COMPONENTS
+// ═══════════════════════════════════════════════════════════
+const Light = ({ color, size = 'md' }) => {
+  const c = { green:'bg-green-500', yellow:'bg-yellow-400', red:'bg-red-500', gray:'bg-gray-300' }[color] || 'bg-gray-300';
+  const s = { sm:'w-2.5 h-2.5', md:'w-4 h-4', lg:'w-6 h-6', xl:'w-9 h-9' }[size];
+  const ring = { green:'ring-green-200', yellow:'ring-yellow-200', red:'ring-red-200', gray:'ring-gray-200' }[color];
+  return <span className={`inline-block rounded-full ${c} ${s} ring-4 ${ring} shadow-sm flex-shrink-0`} />;
+};
+
+const Trend = ({ t, size = 'base' }) => {
+  const s = size === 'sm' ? 'text-sm' : 'text-lg';
+  if (t === 'up')   return <span className={`${s} font-bold text-green-500`}>↑</span>;
+  if (t === 'down') return <span className={`${s} font-bold text-red-500`}>↓</span>;
+  return <span className={`${s} font-semibold text-gray-300`}>→</span>;
+};
+
+const ScoreBar = ({ score, showLabel = true }) => {
+  if (score == null) return <span className="text-xs text-gray-400">Sin datos</span>;
+  const pct   = Math.round((score / 10) * 100);
+  const color = score >= 6.5 ? 'bg-green-500' : score >= 3.5 ? 'bg-yellow-400' : 'bg-red-500';
+  return (
+    <div className="space-y-0.5">
+      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`${color} h-full rounded-full transition-all`} style={{ width: `${pct}%` }} />
+      </div>
+      {showLabel && <div className="text-xs text-gray-400 text-right leading-none">{score}/10</div>}
+    </div>
+  );
+};
+
+const Badge = ({ children, color = 'gray' }) => {
+  const cls = {
+    green:  'bg-green-100 text-green-700',
+    yellow: 'bg-yellow-100 text-yellow-700',
+    red:    'bg-red-100 text-red-600',
+    blue:   'bg-blue-100 text-blue-700',
+    gray:   'bg-gray-100 text-gray-500',
+  }[color];
+  return <span className={`inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded-full ${cls}`}>{children}</span>;
+};
+
+const Card = ({ children, className = '' }) => (
+  <div className={`bg-white rounded-2xl border border-gray-100 shadow-sm ${className}`}>{children}</div>
+);
+
+const Spinner = () => (
+  <div className="flex items-center justify-center p-12">
+    <div className="w-8 h-8 border-4 border-slate-200 border-t-slate-700 rounded-full animate-spin" />
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════════
+// LOGIN PAGE
+// ═══════════════════════════════════════════════════════════
+function LoginPage({ onLogin }) {
+  const [form, setForm] = React.useState({ email: '', password: '' });
+  const [error, setError] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      const d = await api('/api/auth/login', { method: 'POST', body: form });
+      setAuth(d.token, d.user);
+      onLogin(d.user);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 flex items-center justify-center p-4">
+      <div className="fade-in w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="text-4xl font-black text-white tracking-tighter">ENCOM</div>
+          <div className="text-xs font-semibold tracking-[0.3em] text-orange-400 uppercase mt-1">Performance Tracker</div>
+        </div>
+        <Card className="p-8">
+          <form onSubmit={submit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email de trabajo</label>
+              <input type="email" required autoFocus
+                value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-slate-400 focus:border-transparent outline-none transition"
+                placeholder="tu@encom.es" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Contraseña</label>
+              <input type="password" required
+                value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-slate-400 focus:border-transparent outline-none transition"
+                placeholder="••••••••" />
+            </div>
+            {error && <div className="bg-red-50 text-red-600 text-sm rounded-xl px-4 py-3">{error}</div>}
+            <button type="submit" disabled={loading}
+              className="w-full bg-slate-900 text-white py-3 rounded-xl font-semibold text-sm hover:bg-slate-800 active:scale-[.98] transition disabled:opacity-50 mt-2">
+              {loading ? 'Entrando...' : 'Entrar →'}
+            </button>
+          </form>
+        </Card>
+        <p className="text-center text-xs text-slate-600 mt-6">OWN Valencia · Encom Events</p>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// EMPLOYEE HOME
+// ═══════════════════════════════════════════════════════════
+function EmployeeHome({ user, onNavigate, onLogout }) {
+  const [status, setStatus] = React.useState(null);
+  const days = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  const today = new Date().getDay();
+  const dayName = days[today];
+  const isFridayOrLater = today >= 5;
+
+  React.useEffect(() => {
+    api('/api/me/status').then(setStatus).catch(console.error);
+  }, []);
+
+  const allDone = status?.hasPlan && status?.hasReview;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-slate-950 px-5 py-4 flex items-center justify-between">
+        <div>
+          <div className="text-base font-black text-white tracking-tighter">ENCOM <span className="text-orange-400">Tracker</span></div>
+        </div>
+        <button onClick={onLogout} className="text-xs text-slate-500 hover:text-slate-300 transition">Salir</button>
+      </div>
+
+      <div className="max-w-lg mx-auto p-5 space-y-4 fade-in">
+        {/* Welcome banner */}
+        <div className="bg-gradient-to-r from-slate-900 to-blue-900 rounded-2xl p-6 text-white">
+          <div className="text-xs uppercase tracking-widest text-blue-300 font-semibold">{dayName}</div>
+          <div className="text-2xl font-bold mt-1">¡Hola, {user.name.split(' ')[0]}!</div>
+          <div className="text-sm text-blue-200 mt-1">
+            {allDone ? '✓ Semana completada. ¡Gracias!' : 'Revisa tus formularios pendientes.'}
+          </div>
+        </div>
+
+        {status && (
+          <>
+            {/* Monday plan card */}
+            <Card className="p-5">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-xl flex-shrink-0">📋</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-gray-900">Plan semanal</div>
+                  <div className="text-sm text-gray-400 mt-0.5">Lunes · Tareas y prioridades de la semana</div>
+                </div>
+                {status.hasPlan
+                  ? <Badge color="green">✓ Enviado</Badge>
+                  : <button onClick={() => onNavigate('monday')}
+                      className="flex-shrink-0 bg-slate-900 text-white text-sm px-4 py-2 rounded-xl font-medium hover:bg-slate-700 transition">
+                      Completar
+                    </button>
+                }
+              </div>
+            </Card>
+
+            {/* Friday review card */}
+            <Card className={`p-5 ${isFridayOrLater && !status.hasReview ? 'ring-2 ring-orange-300' : ''}`}>
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-xl flex-shrink-0">✅</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-gray-900">Revisión semanal</div>
+                  <div className="text-sm text-gray-400 mt-0.5">Viernes · Desempeño, logros y reflexiones</div>
+                </div>
+                {status.hasReview
+                  ? <Badge color="green">✓ Enviado</Badge>
+                  : isFridayOrLater
+                    ? <button onClick={() => onNavigate('friday')}
+                        className="flex-shrink-0 bg-orange-500 text-white text-sm px-4 py-2 rounded-xl font-medium hover:bg-orange-600 transition">
+                        Completar
+                      </button>
+                    : <span className="text-sm text-gray-400 flex-shrink-0">Disponible el viernes</span>
+                }
+              </div>
+            </Card>
+
+            {allDone && (
+              <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
+                <div className="text-green-600 font-semibold">🎉 ¡Todo enviado esta semana!</div>
+                <div className="text-green-500 text-sm mt-0.5">Hasta el próximo lunes.</div>
+              </div>
+            )}
+          </>
+        )}
+        {!status && <Spinner />}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// MONDAY FORM
+// ═══════════════════════════════════════════════════════════
+function MondayForm({ user, onBack, onSuccess }) {
+  const [step, setStep] = React.useState(1);
+  const STEPS = 5;
+  const [form, setForm] = React.useState({
+    tasks: '', clarity_level: 3, has_blockers: false,
+    known_blockers: '', task_importance: 3, needs_from_encom: ''
+  });
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+
+  const canNext = step === 1 ? form.tasks.trim().length > 0 : true;
+
+  async function submit() {
+    setLoading(true); setError('');
+    try {
+      await api('/api/forms/monday', { method: 'POST', body: {
+        ...form, known_blockers: form.has_blockers ? form.known_blockers : ''
+      }});
+      onSuccess('¡Plan semanal enviado! Buena semana 💪');
+    } catch (e) { setError(e.message); setLoading(false); }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-slate-950 px-5 py-4 flex items-center gap-3">
+        <button onClick={onBack} className="text-slate-400 hover:text-white transition text-lg leading-none">‹</button>
+        <div className="text-sm font-semibold text-white">Plan Semanal · Lunes</div>
+      </div>
+
+      <div className="max-w-lg mx-auto p-5 fade-in">
+        {/* Progress */}
+        <div className="flex items-center gap-2 mb-6">
+          {Array.from({length: STEPS}, (_, i) => (
+            <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${i < step ? 'bg-blue-600' : 'bg-gray-200'}`} />
+          ))}
+          <span className="text-xs text-gray-400 ml-1 whitespace-nowrap">{step}/{STEPS}</span>
+        </div>
+
+        <Card className="p-6">
+          {step === 1 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">Pregunta 1 de 5</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Cuáles son tus tareas principales esta semana?</h2>
+                <p className="text-sm text-gray-500 mt-1">Describe las 2–3 tareas más importantes que planeas completar.</p>
+              </div>
+              <textarea rows={6} value={form.tasks} onChange={e => setForm(f => ({...f, tasks: e.target.value}))}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none resize-none"
+                placeholder={"• Ej: Preparar propuesta para cliente X\n• Revisar contratos con proveedores\n• Coordinación con el equipo de diseño"} />
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">Pregunta 2 de 5</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Cuánta claridad tienes sobre lo que debes hacer?</h2>
+                <p className="text-sm text-gray-500 mt-1">¿Tienes bien definidos tus objetivos y cómo alcanzarlos?</p>
+              </div>
+              <div className="space-y-2">
+                {[
+                  {v:1, label:'Muy confuso', desc:'No tengo claros los objetivos', color:'bg-red-50 border-red-200'},
+                  {v:2, label:'Poco claro', desc:'Tengo dudas importantes', color:'bg-orange-50 border-orange-200'},
+                  {v:3, label:'Bastante claro', desc:'Entiendo lo que debo hacer', color:'bg-yellow-50 border-yellow-200'},
+                  {v:4, label:'Claro', desc:'Lo tengo bien definido', color:'bg-blue-50 border-blue-200'},
+                  {v:5, label:'Totalmente claro', desc:'Todo perfectamente definido', color:'bg-green-50 border-green-200'},
+                ].map(opt => (
+                  <button key={opt.v} type="button" onClick={() => setForm(f => ({...f, clarity_level: opt.v}))}
+                    className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all flex items-center gap-3 ${form.clarity_level === opt.v ? opt.color + ' shadow-sm scale-[1.01]' : 'border-gray-100 hover:border-gray-200'}`}>
+                    <span className={`text-xl font-black ${form.clarity_level === opt.v ? 'text-gray-700' : 'text-gray-200'}`}>{opt.v}</span>
+                    <div>
+                      <div className="font-semibold text-gray-800 text-sm">{opt.label}</div>
+                      <div className="text-xs text-gray-500">{opt.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">Pregunta 3 de 5</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Anticipas algún bloqueo esta semana?</h2>
+                <p className="text-sm text-gray-500 mt-1">Algo que pueda impedir que avances con tus tareas.</p>
+              </div>
+              <div className="flex gap-3">
+                {[{v:false, label:'No, todo bien', emoji:'👍'}, {v:true, label:'Sí, hay algo', emoji:'⚠️'}].map(opt => (
+                  <button key={String(opt.v)} type="button" onClick={() => setForm(f => ({...f, has_blockers: opt.v}))}
+                    className={`flex-1 py-4 rounded-xl border-2 font-semibold text-sm transition-all flex flex-col items-center gap-1
+                      ${form.has_blockers === opt.v ? 'border-blue-500 bg-blue-50 text-blue-700 scale-[1.02]' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    <span className="text-2xl">{opt.emoji}</span>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {form.has_blockers && (
+                <div className="fade-in">
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">¿Qué bloqueo anticipas?</label>
+                  <textarea rows={3} value={form.known_blockers} onChange={e => setForm(f => ({...f, known_blockers: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none resize-none"
+                    placeholder="Describe el bloqueo y qué necesitarías para resolverlo..." />
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">Pregunta 4 de 5</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Cómo valoras la importancia estratégica de tus tareas?</h2>
+                <p className="text-sm text-gray-500 mt-1">¿Cuánto contribuyen a los objetivos de Encom y OWN Valencia?</p>
+              </div>
+              <div className="space-y-2">
+                {[
+                  {v:1, label:'Poco relevante', desc:'Tareas operativas rutinarias'},
+                  {v:2, label:'Relevante', desc:'Contribuye al día a día del equipo'},
+                  {v:3, label:'Importante', desc:'Impacto claro en los resultados'},
+                  {v:4, label:'Muy importante', desc:'Afecta directamente a los objetivos'},
+                  {v:5, label:'Crítico para Encom', desc:'Impacto estratégico máximo'},
+                ].map(opt => (
+                  <button key={opt.v} type="button" onClick={() => setForm(f => ({...f, task_importance: opt.v}))}
+                    className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all flex items-center gap-3
+                      ${form.task_importance === opt.v ? 'border-blue-500 bg-blue-50 shadow-sm scale-[1.01]' : 'border-gray-100 hover:border-gray-200'}`}>
+                    <div className="flex gap-0.5">
+                      {Array.from({length:5}, (_, i) => (
+                        <span key={i} className={`text-lg ${i < opt.v ? 'text-yellow-400' : 'text-gray-200'}`}>★</span>
+                      ))}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-sm text-gray-800">{opt.label}</div>
+                      <div className="text-xs text-gray-500">{opt.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">Pregunta 5 de 5</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Necesitas algo de Encom para rendir esta semana?</h2>
+                <p className="text-sm text-gray-500 mt-1">Recursos, aprobaciones, información, apoyo del equipo... (opcional)</p>
+              </div>
+              <textarea rows={4} value={form.needs_from_encom} onChange={e => setForm(f => ({...f, needs_from_encom: e.target.value}))}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none resize-none"
+                placeholder="Ej: Necesito la aprobación del presupuesto para avanzar con el proveedor..." />
+              {error && <div className="bg-red-50 text-red-600 text-sm rounded-xl px-4 py-3">{error}</div>}
+            </div>
+          )}
+
+          <div className="flex gap-3 mt-8">
+            {step > 1 && (
+              <button onClick={() => setStep(s => s - 1)}
+                className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">
+                ← Atrás
+              </button>
+            )}
+            {step < STEPS
+              ? <button onClick={() => canNext && setStep(s => s + 1)} disabled={!canNext}
+                  className={`flex-1 py-3 rounded-xl text-sm font-semibold transition ${canNext ? 'bg-slate-900 text-white hover:bg-slate-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+                  Siguiente →
+                </button>
+              : <button onClick={submit} disabled={loading}
+                  className="flex-1 py-3 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50">
+                  {loading ? 'Enviando...' : '✓ Enviar plan semanal'}
+                </button>
+            }
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// FRIDAY FORM
+// ═══════════════════════════════════════════════════════════
+function FridayForm({ user, onBack, onSuccess }) {
+  const [step, setStep] = React.useState(1);
+  const STEPS = 6;
+  const [form, setForm] = React.useState({
+    tasks_completed_pct: 70, performance_score: 3,
+    blockers: '', uncertainties: '', achievements: '', mood_next_week: 3
+  });
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+
+  const canNext = step === 5 ? form.achievements.trim().length > 0 : true;
+
+  async function submit() {
+    setLoading(true); setError('');
+    try {
+      await api('/api/forms/friday', { method: 'POST', body: form });
+      onSuccess('¡Revisión enviada! Buen fin de semana 🎉');
+    } catch (e) { setError(e.message); setLoading(false); }
+  }
+
+  const pct = form.tasks_completed_pct;
+  const pctColor = pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-yellow-600' : 'text-red-500';
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-slate-950 px-5 py-4 flex items-center gap-3">
+        <button onClick={onBack} className="text-slate-400 hover:text-white transition text-lg leading-none">‹</button>
+        <div className="text-sm font-semibold text-white">Revisión Semanal · Viernes</div>
+      </div>
+
+      <div className="max-w-lg mx-auto p-5 fade-in">
+        <div className="flex items-center gap-2 mb-6">
+          {Array.from({length: STEPS}, (_, i) => (
+            <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${i < step ? 'bg-orange-500' : 'bg-gray-200'}`} />
+          ))}
+          <span className="text-xs text-gray-400 ml-1 whitespace-nowrap">{step}/{STEPS}</span>
+        </div>
+
+        <Card className="p-6">
+          {step === 1 && (
+            <div className="space-y-5 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-1">Pregunta 1 de 6</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Qué % de tus tareas del lunes has completado?</h2>
+              </div>
+              <div className="text-center py-4">
+                <div className={`text-6xl font-black ${pctColor} transition-colors`}>{pct}%</div>
+                <div className="text-sm text-gray-400 mt-2">Arrastra para ajustar</div>
+              </div>
+              <input type="range" min="0" max="100" step="5" value={pct}
+                onChange={e => setForm(f => ({...f, tasks_completed_pct: +e.target.value}))}
+                className="w-full accent-orange-500 h-2" />
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-1">Pregunta 2 de 6</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Cómo valorarías tu rendimiento esta semana?</h2>
+              </div>
+              <div className="space-y-2">
+                {[
+                  {v:1, label:'Muy por debajo', desc:'No cumplí lo esperado', emoji:'😞'},
+                  {v:2, label:'Por debajo', desc:'Cumplí menos de lo planeado', emoji:'😕'},
+                  {v:3, label:'En línea', desc:'Cumplí lo esperado', emoji:'😐'},
+                  {v:4, label:'Por encima', desc:'Superé mis objetivos', emoji:'🙂'},
+                  {v:5, label:'Excelente semana', desc:'Rendimiento máximo', emoji:'🚀'},
+                ].map(opt => (
+                  <button key={opt.v} type="button" onClick={() => setForm(f => ({...f, performance_score: opt.v}))}
+                    className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all flex items-center gap-3
+                      ${form.performance_score === opt.v ? 'border-orange-400 bg-orange-50 shadow-sm scale-[1.01]' : 'border-gray-100 hover:border-gray-200'}`}>
+                    <span className="text-2xl">{opt.emoji}</span>
+                    <div>
+                      <div className="font-semibold text-sm text-gray-800">{opt.label}</div>
+                      <div className="text-xs text-gray-500">{opt.desc}</div>
+                    </div>
+                    <span className={`ml-auto text-xl font-black ${form.performance_score === opt.v ? 'text-orange-400' : 'text-gray-200'}`}>{opt.v}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-1">Pregunta 3 de 6</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Qué te ha bloqueado o ralentizado esta semana?</h2>
+                <p className="text-sm text-gray-500 mt-1">Si no hubo nada, puedes dejarlo vacío.</p>
+              </div>
+              <textarea rows={4} value={form.blockers} onChange={e => setForm(f => ({...f, blockers: e.target.value}))}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-300 outline-none resize-none"
+                placeholder="Ej: El cliente no me devolvió la llamada, el proveedor retrasó la entrega..." />
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-1">Pregunta 4 de 6</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Hay alguna incertidumbre que no sabes cómo resolver?</h2>
+                <p className="text-sm text-gray-500 mt-1">Dudas, preguntas abiertas, decisiones pendientes... (opcional)</p>
+              </div>
+              <textarea rows={4} value={form.uncertainties} onChange={e => setForm(f => ({...f, uncertainties: e.target.value}))}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-300 outline-none resize-none"
+                placeholder="Ej: No sé si el presupuesto va a llegar a tiempo para el evento de mayo..." />
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-4 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-1">Pregunta 5 de 6</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Cuál es tu principal logro de esta semana?</h2>
+                <p className="text-sm text-gray-500 mt-1">Aunque sea pequeño, cuéntanos qué conseguiste.</p>
+              </div>
+              <textarea rows={4} value={form.achievements} onChange={e => setForm(f => ({...f, achievements: e.target.value}))}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-300 outline-none resize-none"
+                placeholder="Ej: Cerré el acuerdo con el proveedor de sonido para OWN Valencia..." />
+            </div>
+          )}
+
+          {step === 6 && (
+            <div className="space-y-5 fade-in">
+              <div>
+                <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-1">Pregunta 6 de 6</div>
+                <h2 className="text-lg font-bold text-gray-900">¿Cómo te sientes de cara a la semana que viene?</h2>
+              </div>
+              <div className="flex justify-between gap-2">
+                {[
+                  {v:1, emoji:'😞', label:'Muy mal'},
+                  {v:2, emoji:'😕', label:'Mal'},
+                  {v:3, emoji:'😐', label:'Regular'},
+                  {v:4, emoji:'🙂', label:'Bien'},
+                  {v:5, emoji:'🚀', label:'¡Genial!'},
+                ].map(opt => (
+                  <button key={opt.v} type="button" onClick={() => setForm(f => ({...f, mood_next_week: opt.v}))}
+                    className={`flex-1 flex flex-col items-center py-3 px-1 rounded-xl border-2 transition-all text-center
+                      ${form.mood_next_week === opt.v ? 'border-orange-400 bg-orange-50 scale-105 shadow' : 'border-gray-100 hover:border-gray-200'}`}>
+                    <span className="text-2xl">{opt.emoji}</span>
+                    <span className="text-xs text-gray-500 mt-1 leading-tight">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+              {error && <div className="bg-red-50 text-red-600 text-sm rounded-xl px-4 py-3">{error}</div>}
+            </div>
+          )}
+
+          <div className="flex gap-3 mt-8">
+            {step > 1 && (
+              <button onClick={() => setStep(s => s - 1)}
+                className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">
+                ← Atrás
+              </button>
+            )}
+            {step < STEPS
+              ? <button onClick={() => canNext && setStep(s => s + 1)} disabled={!canNext}
+                  className={`flex-1 py-3 rounded-xl text-sm font-semibold transition ${canNext ? 'bg-slate-900 text-white hover:bg-slate-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+                  Siguiente →
+                </button>
+              : <button onClick={submit} disabled={loading}
+                  className="flex-1 py-3 bg-orange-500 text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-50">
+                  {loading ? 'Enviando...' : '✓ Enviar revisión'}
+                </button>
+            }
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADMIN DASHBOARD
+// ═══════════════════════════════════════════════════════════
+function AdminDashboard({ user, onLogout, onViewEmployee }) {
+  const [employees, setEmployees] = React.useState([]);
+  const [alerts, setAlerts] = React.useState([]);
+  const [tab, setTab] = React.useState('team');
+  const [loading, setLoading] = React.useState(true);
+  const [showAddUser, setShowAddUser] = React.useState(false);
+
+  const refresh = () => {
+    setLoading(true);
+    Promise.all([api('/api/admin/employees'), api('/api/admin/alerts')])
+      .then(([e, a]) => { setEmployees(e); setAlerts(a); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+  React.useEffect(refresh, []);
+
+  const stats = {
+    green:  employees.filter(e => e.color === 'green').length,
+    yellow: employees.filter(e => e.color === 'yellow').length,
+    red:    employees.filter(e => e.color === 'red').length,
+    plans:  employees.filter(e => e.hasPlan).length,
+    reviews:employees.filter(e => e.hasReview).length,
+    total:  employees.length,
+  };
+  const critAlerts = alerts.filter(a => a.severity === 'critical' || a.severity === 'high');
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-slate-950 px-6 py-4">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div>
+            <div className="text-lg font-black text-white tracking-tighter">ENCOM <span className="text-orange-400">Tracker</span></div>
+            <div className="text-xs text-slate-500 mt-0.5">Panel de gestión · Semana actual</div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-slate-400">{user.name}</span>
+            <button onClick={onLogout} className="text-xs text-slate-600 hover:text-slate-300 transition">Salir</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-6 space-y-5 fade-in">
+        {/* KPI row */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {[
+            { label: 'En verde', val: stats.green, color: 'text-green-600', bg: 'bg-green-50 border-green-100' },
+            { label: 'Atención', val: stats.yellow, color: 'text-yellow-600', bg: 'bg-yellow-50 border-yellow-100' },
+            { label: 'Alerta', val: stats.red, color: 'text-red-600', bg: 'bg-red-50 border-red-100' },
+            { label: 'Plan lunes', val: `${stats.plans}/${stats.total}`, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-100' },
+            { label: 'Rev. viernes', val: `${stats.reviews}/${stats.total}`, color: 'text-orange-500', bg: 'bg-orange-50 border-orange-100' },
+          ].map(k => (
+            <div key={k.label} className={`rounded-2xl border px-4 py-3 ${k.bg}`}>
+              <div className={`text-2xl font-black ${k.color}`}>{k.val}</div>
+              <div className="text-xs text-gray-500 mt-0.5">{k.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Critical alerts banner */}
+        {critAlerts.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+            <div className="text-sm font-bold text-red-700 mb-3">⚠️ Alertas que requieren atención ({critAlerts.length})</div>
+            <div className="space-y-2">
+              {critAlerts.slice(0, 5).map((a, i) => (
+                <div key={i} className="flex items-start gap-3 bg-white rounded-xl px-3 py-2.5">
+                  <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${a.severity === 'critical' ? 'bg-red-500' : 'bg-orange-400'}`} />
+                  <div className="min-w-0">
+                    <button onClick={() => onViewEmployee(a.user.id)} className="text-sm font-semibold text-gray-900 hover:text-blue-600 transition">{a.user.name}</button>
+                    <div className="text-xs text-gray-500 truncate mt-0.5">{a.message}</div>
+                  </div>
+                </div>
+              ))}
+              {critAlerts.length > 5 && <div className="text-xs text-red-500 text-center">+{critAlerts.length - 5} más</div>}
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div className="flex gap-1 bg-gray-200 p-1 rounded-xl w-fit">
+          {[{id:'team',label:'Equipo'},{id:'alerts',label:`Alertas ${alerts.length > 0 ? `(${alerts.length})` : ''}`}].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition ${tab === t.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Team tab */}
+        {tab === 'team' && (
+          <Card>
+            <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-700">Equipo · {employees.length} personas</div>
+              <button onClick={() => setShowAddUser(true)}
+                className="text-xs text-blue-600 hover:text-blue-800 font-semibold transition">+ Añadir empleado</button>
+            </div>
+            {loading ? <Spinner /> : (
+              <div className="divide-y divide-gray-50">
+                {employees.map(emp => (
+                  <button key={emp.id} onClick={() => onViewEmployee(emp.id)}
+                    className="w-full text-left px-5 py-4 hover:bg-gray-50 transition flex items-center gap-4">
+                    {/* Light */}
+                    <Light color={emp.color} size="md" />
+                    {/* Name */}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-gray-900 leading-tight">{emp.name}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">{emp.email}</div>
+                    </div>
+                    {/* Score bar */}
+                    <div className="w-28 hidden sm:block">
+                      <ScoreBar score={emp.score} />
+                    </div>
+                    {/* Trend */}
+                    <Trend t={emp.trend} />
+                    {/* Form badges */}
+                    <div className="flex gap-1.5">
+                      <span className={`w-5 h-5 rounded-md text-xs font-bold flex items-center justify-center ${emp.hasPlan ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-400'}`} title="Plan lunes">L</span>
+                      <span className={`w-5 h-5 rounded-md text-xs font-bold flex items-center justify-center ${emp.hasReview ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-400'}`} title="Revisión viernes">V</span>
+                    </div>
+                    {/* Patterns */}
+                    <div className="hidden lg:flex gap-1 flex-wrap max-w-[180px]">
+                      {(emp.patterns || []).slice(0,2).map((p, i) => (
+                        <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium
+                          ${p.type === 'high' || p.type === 'improving' ? 'bg-green-100 text-green-700' :
+                            p.type === 'low' || p.type === 'declining' || p.type === 'blockers' ? 'bg-red-100 text-red-600' :
+                            'bg-yellow-100 text-yellow-700'}`}>{p.label}</span>
+                      ))}
+                    </div>
+                    <span className="text-gray-300 text-lg">›</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="px-5 py-3 border-t border-gray-50 flex items-center gap-5 text-xs text-gray-400">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 inline-block"/>Verde ≥ 6.5/10</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-yellow-400 inline-block"/>Amarillo 3.5–6.5</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500 inline-block"/>Rojo &lt; 3.5</span>
+              <span className="ml-auto">L = plan lunes · V = revisión viernes</span>
+            </div>
+          </Card>
+        )}
+
+        {/* Alerts tab */}
+        {tab === 'alerts' && (
+          <Card>
+            <div className="px-5 py-4 border-b border-gray-50">
+              <div className="text-sm font-semibold text-gray-700">Todas las alertas · esta semana</div>
+            </div>
+            {alerts.length === 0
+              ? <div className="p-10 text-center text-gray-400 text-sm">✓ Sin alertas activas esta semana</div>
+              : <div className="divide-y divide-gray-50">
+                {alerts.map((a, i) => {
+                  const sevCls = { critical: 'text-red-600', high: 'text-orange-500', medium: 'text-yellow-600' }[a.severity] || 'text-gray-500';
+                  const dotCls = { critical: 'bg-red-500', high: 'bg-orange-400', medium: 'bg-yellow-400' }[a.severity] || 'bg-gray-300';
+                  const icon = { missing_plan: '📋', missing_review: '📝', blocker: '🚧', low_performance: '📉', pattern: '🔍' }[a.type] || '⚠️';
+                  return (
+                    <div key={i} className="px-5 py-4 flex items-start gap-3">
+                      <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${dotCls}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{icon}</span>
+                          <button onClick={() => onViewEmployee(a.user.id)}
+                            className="text-sm font-semibold text-gray-900 hover:text-blue-600 transition">{a.user.name}</button>
+                          <span className={`text-xs font-medium capitalize ${sevCls}`}>{a.severity}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">{a.message}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            }
+          </Card>
+        )}
+      </div>
+
+      {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onAdded={refresh} />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADD USER MODAL
+// ═══════════════════════════════════════════════════════════
+function AddUserModal({ onClose, onAdded }) {
+  const [form, setForm] = React.useState({ name: '', email: '', password: '' });
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [success, setSuccess] = React.useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      await api('/api/admin/create-user', { method: 'POST', body: form });
+      setSuccess(true); onAdded();
+      setTimeout(onClose, 1500);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={e => e.target === e.currentTarget && onClose()}>
+      <Card className="w-full max-w-sm p-6 fade-in">
+        <div className="text-base font-bold text-gray-900 mb-4">Añadir empleado</div>
+        {success
+          ? <div className="text-center py-6 text-green-600 font-semibold">✓ Empleado creado correctamente</div>
+          : <form onSubmit={submit} className="space-y-3">
+            {[{k:'name',l:'Nombre completo',t:'text',p:'María García'},
+              {k:'email',l:'Email de trabajo',t:'email',p:'maria@encom.es'},
+              {k:'password',l:'Contraseña inicial',t:'text',p:'Mínimo 8 caracteres'}].map(f => (
+              <div key={f.k}>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{f.l}</label>
+                <input type={f.t} required placeholder={f.p} value={form[f.k]}
+                  onChange={e => setForm(p => ({...p, [f.k]: e.target.value}))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
+              </div>
+            ))}
+            {error && <div className="text-red-600 text-xs bg-red-50 px-3 py-2 rounded-lg">{error}</div>}
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={onClose} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
+              <button type="submit" disabled={loading} className="flex-1 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-700 disabled:opacity-50">
+                {loading ? 'Creando...' : 'Crear'}
+              </button>
+            </div>
+          </form>
+        }
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// EMPLOYEE DETAIL (admin view)
+// ═══════════════════════════════════════════════════════════
+function EmployeeDetail({ id, onBack }) {
+  const [data, setData] = React.useState(null);
+  const [tab, setTab] = React.useState('overview');
+
+  React.useEffect(() => {
+    api(`/api/admin/employee/${id}`).then(setData).catch(console.error);
+  }, [id]);
+
+  if (!data) return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-slate-950 px-5 py-4 flex items-center gap-3">
+        <button onClick={onBack} className="text-slate-400 hover:text-white transition text-lg">‹</button>
+        <div className="text-sm font-semibold text-white">Cargando...</div>
+      </div>
+      <Spinner />
+    </div>
+  );
+
+  const { user, status, history } = data;
+  const s = status;
+  const colorLabel = { green: 'Buen rendimiento', yellow: 'Necesita atención', red: 'Requiere acción', gray: 'Sin datos' }[s.color];
+
+  // Chart data: last 8 weeks
+  const chartData = [...history].reverse().slice(0, 8);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-slate-950 px-5 py-4 flex items-center gap-3">
+        <button onClick={onBack} className="text-slate-400 hover:text-white transition text-xl leading-none">‹</button>
+        <div className="text-sm font-semibold text-white">Detalle empleado</div>
+      </div>
+
+      <div className="max-w-4xl mx-auto px-5 py-6 space-y-5 fade-in">
+        {/* Employee header card */}
+        <Card className="p-6">
+          <div className="flex items-start gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl font-black text-slate-400">
+              {user.name.charAt(0)}
+            </div>
+            <div className="flex-1">
+              <div className="text-xl font-bold text-gray-900">{user.name}</div>
+              <div className="text-sm text-gray-400 mt-0.5">{user.email}</div>
+              <div className="flex items-center gap-3 mt-3">
+                <Light color={s.color} size="lg" />
+                <div>
+                  <div className="text-sm font-semibold text-gray-700">{colorLabel}</div>
+                  <div className="text-xs text-gray-400 flex items-center gap-1">
+                    {s.score != null ? `${s.score}/10 · ` : ''}Tendencia: <Trend t={s.trend} size="sm" />
+                  </div>
+                </div>
+                {s.score != null && (
+                  <div className="ml-auto">
+                    <div className={`text-3xl font-black ${s.score >= 6.5 ? 'text-green-600' : s.score >= 3.5 ? 'text-yellow-500' : 'text-red-500'}`}>{s.score}</div>
+                    <div className="text-xs text-gray-400 text-right">/10</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Patterns */}
+          {s.patterns?.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {s.patterns.map((p, i) => (
+                <span key={i} className={`text-xs px-3 py-1.5 rounded-full font-semibold
+                  ${p.type === 'high' || p.type === 'improving' ? 'bg-green-100 text-green-700' :
+                    p.type === 'low' || p.type === 'declining' || p.type === 'blockers' ? 'bg-red-100 text-red-600' :
+                    'bg-yellow-100 text-yellow-700'}`}>
+                  {p.label}
+                </span>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Performance chart */}
+        {chartData.length > 1 && (
+          <Card className="p-5">
+            <div className="text-sm font-semibold text-gray-700 mb-4">Rendimiento — últimas {chartData.length} semanas</div>
+            <div className="flex items-end gap-2 h-28">
+              {chartData.map((w, i) => {
+                const sc = w.score;
+                const isLast = i === chartData.length - 1;
+                const h = sc != null ? Math.max(4, Math.round((sc / 10) * 100)) : 0;
+                const bg = sc == null ? 'bg-gray-100' : sc >= 6.5 ? (isLast ? 'bg-green-500' : 'bg-green-300') : sc >= 3.5 ? (isLast ? 'bg-yellow-400' : 'bg-yellow-200') : (isLast ? 'bg-red-500' : 'bg-red-300');
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="text-xs font-bold text-gray-600">{sc != null ? sc : '–'}</div>
+                    <div className={`w-full rounded-t-lg ${bg} transition-all`} style={{ height: `${h}%`, minHeight: sc != null ? '4px' : '0' }} />
+                    <div className="text-xs text-gray-400 whitespace-nowrap text-center" style={{fontSize:'9px'}}>{fmtWeek(w.week).split('–')[0]}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-4 mt-3 text-xs text-gray-400">
+              <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-green-300 inline-block"/>≥ 6.5</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-yellow-200 inline-block"/>3.5–6.5</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-red-300 inline-block"/>&lt; 3.5</span>
+            </div>
+          </Card>
+        )}
+
+        {/* Tabs */}
+        <div className="flex gap-1 bg-gray-200 p-1 rounded-xl w-fit">
+          {[{id:'overview',label:'Esta semana'},{id:'history',label:'Historial'}].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition ${tab === t.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Overview: current week detail */}
+        {tab === 'overview' && (
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card className="p-5">
+              <div className="text-xs font-bold uppercase tracking-wider text-blue-600 mb-3">📋 Plan del lunes</div>
+              {s.currentPlanData ? (
+                <div className="space-y-3 text-sm">
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">Tareas</div>
+                    <div className="text-gray-700 whitespace-pre-wrap leading-relaxed">{s.currentPlanData.tasks}</div>
+                  </div>
+                  <div className="flex gap-4">
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Claridad</div>
+                      <div className="text-lg font-black text-gray-700">{s.currentPlanData.clarity_level}/5</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Importancia</div>
+                      <div className="text-lg font-black text-gray-700">{s.currentPlanData.task_importance}/5</div>
+                    </div>
+                  </div>
+                  {s.currentPlanData.known_blockers && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                      <div className="text-xs font-bold text-orange-600 mb-1">⚠️ Bloqueo anticipado</div>
+                      <div className="text-xs text-orange-700">{s.currentPlanData.known_blockers}</div>
+                    </div>
+                  )}
+                  {s.currentPlanData.needs_from_encom && (
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Necesita de Encom</div>
+                      <div className="text-xs text-gray-600">{s.currentPlanData.needs_from_encom}</div>
+                    </div>
+                  )}
+                </div>
+              ) : <div className="text-sm text-gray-400 py-4 text-center">No enviado esta semana</div>}
+            </Card>
+
+            <Card className="p-5">
+              <div className="text-xs font-bold uppercase tracking-wider text-orange-500 mb-3">✅ Revisión del viernes</div>
+              {s.currentReviewData ? (
+                <div className="space-y-3 text-sm">
+                  <div className="flex gap-4">
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Tareas completadas</div>
+                      <div className={`text-2xl font-black ${s.currentReviewData.tasks_completed_pct >= 70 ? 'text-green-600' : s.currentReviewData.tasks_completed_pct >= 40 ? 'text-yellow-600' : 'text-red-500'}`}>
+                        {s.currentReviewData.tasks_completed_pct}%
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Autopuntuación</div>
+                      <div className="text-2xl font-black text-gray-700">{s.currentReviewData.performance_score}/5</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Ánimo próx. sem.</div>
+                      <div className="text-2xl">
+                        {['','😞','😕','😐','🙂','🚀'][s.currentReviewData.mood_next_week]}
+                      </div>
+                    </div>
+                  </div>
+                  {s.currentReviewData.achievements && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                      <div className="text-xs font-bold text-green-600 mb-1">🏆 Logro principal</div>
+                      <div className="text-xs text-green-700">{s.currentReviewData.achievements}</div>
+                    </div>
+                  )}
+                  {s.currentReviewData.blockers && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                      <div className="text-xs font-bold text-red-600 mb-1">🚧 Bloqueos</div>
+                      <div className="text-xs text-red-700">{s.currentReviewData.blockers}</div>
+                    </div>
+                  )}
+                  {s.currentReviewData.uncertainties && (
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Incertidumbres</div>
+                      <div className="text-xs text-gray-600">{s.currentReviewData.uncertainties}</div>
+                    </div>
+                  )}
+                </div>
+              ) : <div className="text-sm text-gray-400 py-4 text-center">No enviado esta semana</div>}
+            </Card>
+          </div>
+        )}
+
+        {/* History tab */}
+        {tab === 'history' && (
+          <Card>
+            <div className="px-5 py-4 border-b border-gray-50">
+              <div className="text-sm font-semibold text-gray-700">Historial completo · {history.length} semanas</div>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {history.map((w, i) => {
+                const sc = w.score;
+                const sc10color = sc == null ? 'text-gray-400' : sc >= 6.5 ? 'text-green-600' : sc >= 3.5 ? 'text-yellow-600' : 'text-red-500';
+                return (
+                  <div key={i} className="px-5 py-4">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="text-sm font-semibold text-gray-700">{fmtWeek(w.week)}</div>
+                      {sc != null && <span className={`text-sm font-black ${sc10color}`}>{sc}/10</span>}
+                      <div className="flex gap-1.5 ml-auto">
+                        <span className={`w-5 h-5 rounded-md text-xs font-bold flex items-center justify-center ${w.plan ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>L</span>
+                        <span className={`w-5 h-5 rounded-md text-xs font-bold flex items-center justify-center ${w.review ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>V</span>
+                      </div>
+                    </div>
+                    {w.review && (
+                      <div className="flex gap-4 text-xs text-gray-500 mb-1">
+                        <span>Completado: <strong className={`${w.review.tasks_completed_pct >= 70 ? 'text-green-600' : w.review.tasks_completed_pct >= 40 ? 'text-yellow-600' : 'text-red-500'}`}>{w.review.tasks_completed_pct}%</strong></span>
+                        <span>Autoeval: <strong>{w.review.performance_score}/5</strong></span>
+                        <span>Ánimo: {['','😞','😕','😐','🙂','🚀'][w.review.mood_next_week]}</span>
+                      </div>
+                    )}
+                    {w.review?.achievements && (
+                      <div className="text-xs text-gray-500 truncate">🏆 {w.review.achievements}</div>
+                    )}
+                    {(w.review?.blockers || w.plan?.known_blockers) && (
+                      <div className="text-xs text-orange-600 truncate mt-0.5">🚧 {w.review?.blockers || w.plan?.known_blockers}</div>
+                    )}
+                  </div>
+                );
+              })}
+              {history.length === 0 && (
+                <div className="px-5 py-10 text-center text-sm text-gray-400">Sin historial disponible</div>
+              )}
+            </div>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// SUCCESS TOAST
+// ═══════════════════════════════════════════════════════════
+function Toast({ message, onDone }) {
+  React.useEffect(() => { const t = setTimeout(onDone, 2800); return () => clearTimeout(t); }, []);
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 fade-in">
+      <div className="bg-slate-900 text-white px-6 py-3.5 rounded-2xl shadow-2xl text-sm font-semibold whitespace-nowrap">
+        {message}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// ROOT APP
+// ═══════════════════════════════════════════════════════════
+function App() {
+  const [user, setUser] = React.useState(getUser);
+  const [page, setPage] = React.useState('home');
+  const [empId, setEmpId] = React.useState(null);
+  const [toast, setToast] = React.useState(null);
+
+  function logout() { clearAuth(); setUser(null); setPage('home'); }
+  function showToast(msg) { setToast(msg); }
+
+  if (!user) return <LoginPage onLogin={u => { setUser(u); setPage('home'); }} />;
+
+  if (user.role === 'admin') {
+    if (page === 'employee') return <EmployeeDetail id={empId} onBack={() => setPage('home')} />;
+    return (
+      <>
+        <AdminDashboard user={user} onLogout={logout}
+          onViewEmployee={id => { setEmpId(id); setPage('employee'); }} />
+        {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+      </>
+    );
+  }
+
+  // Employee views
+  if (page === 'monday') return (
+    <MondayForm user={user} onBack={() => setPage('home')}
+      onSuccess={msg => { setPage('home'); showToast(msg); }} />
+  );
+  if (page === 'friday') return (
+    <FridayForm user={user} onBack={() => setPage('home')}
+      onSuccess={msg => { setPage('home'); showToast(msg); }} />
+  );
+
+  return (
+    <>
+      <EmployeeHome user={user} onNavigate={setPage} onLogout={logout} />
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+</script>
+</body>
+</html>
