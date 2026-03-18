@@ -1,0 +1,58 @@
+[
+  {
+    "id": "admin1",
+    "email": "javier@encom.es",
+    "name": "Javier Ruiz",
+    "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
+    "role": "admin",
+    "created_at": "2026-03-17T21:52:22.171Z"
+  },
+  {
+    "id": "emp1",
+    "email": "maria@encom.es",
+    "name": "MarÃ­a GarcÃ­a",
+    "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
+    "role": "employee",
+    "created_at": "2026-03-17T21:52:22.172Z"
+  },
+  {
+    "id": "emp2",
+    "email": "carlos@encom.es",
+    "name": "Carlos LÃ³pez(¬
+    "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
+    "role": "employee",
+    "created_at": "2026-03-17T21:52:22.172Z"
+  },
+  {
+    "id": "emp3",
+    "email": "ana@encom.es",
+    "name": "Ana MartÃ­nez",
+    "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
+    "role": "employee",
+    "created_at": "2026-03-17T21:52:22.172Z"
+  },
+  {
+    "id": "emp4",
+    "email": "david@encom.es",
+    "name": "David SÃ¡nchez",
+    "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
+    "role": "employee",
+    "created_at": "2026-03-17T21:52:22.172Z"
+  },
+  {
+    "id": "emp5",
+    "email": "laura@encom.es",
+    "name": "Laura FernÃ¡ndez",
+    "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
+    "role": "employee",
+    "created_at": "2026-03-17T21:52:22.172Z"
+  },
+  {
+    "id": "emp6",
+    "email": "pablo@encom.es",
+    "name": "Pablo RodrÃ­guez",
+    "password_hash": "bb29c968b49b05f8cffeb9b0f04c0db0:865eab9dbbeca5db258a75cd1e3fb8b2eb943394ec7f74096ed99f1a36bac8c0",
+    "role": "employee",
+    "created_at": "2026-03-17T21:52:22.172Z"
+  }
+]
