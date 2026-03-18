@@ -1,0 +1,8 @@
+{
+  "host": "smtp.gmail.com",
+  "port": 587,
+  "secure": false,
+  "user": "tu_email@gmail.com",
+  "pass": "tu_contrasena_de_aplicacion",
+  "from": "Encom Tracker <tu_email@gmail.com>"
+}
