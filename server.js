@@ -426,6 +426,45 @@ route('POST', '/api/admin/create-user', async (req, res) => {
   respond(res, 200, { success: true, user: { id: newUser.id, email: newUser.email, name: newUser.name } });
 });
 
+// PUT /api/admin/user/:id — edit user (name, email, password)
+route('PUT', '/api/admin/user/', async (req, res, id) => {
+  const user = getUser(req);
+  if (!user || user.role !== 'admin') return respond(res, 403, { error: 'Solo administradores' });
+  const { name, email, password } = await readBody(req);
+  const users = readDB('users');
+  const idx = users.findIndex(u => u.id === id);
+  if (idx === -1) return respond(res, 404, { error: 'Usuario no encontrado' });
+  if (name?.trim()) users[idx].name = name.trim();
+  if (email?.trim()) {
+    const emailLow = email.toLowerCase().trim();
+    if (emailLow !== users[idx].email && users.find(u => u.email === emailLow)) {
+      return respond(res, 400, { error: 'Ese email ya está registrado' });
+    }
+    users[idx].email = emailLow;
+  }
+  if (password && password.length >= 6) {
+    users[idx].password_hash = hashPassword(password);
+  }
+  writeDB('users', users);
+  respond(res, 200, { success: true, user: { id: users[idx].id, email: users[idx].email, name: users[idx].name } });
+});
+
+// DELETE /api/admin/user/:id — delete user and all their form data
+route('DELETE', '/api/admin/user/', async (req, res, id) => {
+  const user = getUser(req);
+  if (!user || user.role !== 'admin') return respond(res, 403, { error: 'Solo administradores' });
+  if (id === user.id) return respond(res, 400, { error: 'No puedes eliminar tu propio usuario' });
+  const users = readDB('users');
+  const idx = users.findIndex(u => u.id === id);
+  if (idx === -1) return respond(res, 404, { error: 'Usuario no encontrado' });
+  users.splice(idx, 1);
+  writeDB('users', users);
+  // Remove all form data for this user
+  writeDB('monday_plans',   readDB('monday_plans').filter(p => p.user_id !== id));
+  writeDB('friday_reviews', readDB('friday_reviews').filter(r => r.user_id !== id));
+  respond(res, 200, { success: true });
+});
+
 // ── Static file server ───────────────────────────────────────
 const MIME = { '.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.ico':'image/x-icon' };
 

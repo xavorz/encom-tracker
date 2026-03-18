@@ -729,6 +729,8 @@ function AdminDashboard({ user, onLogout, onViewEmployee }) {
   const [tab, setTab] = React.useState('team');
   const [loading, setLoading] = React.useState(true);
   const [showAddUser, setShowAddUser] = React.useState(false);
+  const [editUser, setEditUser] = React.useState(null);
+  const [deleteUser, setDeleteUser] = React.useState(null);
 
   const refresh = () => {
     setLoading(true);
@@ -821,15 +823,14 @@ function AdminDashboard({ user, onLogout, onViewEmployee }) {
             {loading ? <Spinner /> : (
               <div className="divide-y divide-gray-50">
                 {employees.map(emp => (
-                  <button key={emp.id} onClick={() => onViewEmployee(emp.id)}
-                    className="w-full text-left px-5 py-4 hover:bg-gray-50 transition flex items-center gap-4">
+                  <div key={emp.id} className="px-5 py-4 hover:bg-gray-50 transition flex items-center gap-4">
                     {/* Light */}
                     <Light color={emp.color} size="md" />
-                    {/* Name */}
-                    <div className="flex-1 min-w-0">
+                    {/* Name — click to view detail */}
+                    <button className="flex-1 min-w-0 text-left" onClick={() => onViewEmployee(emp.id)}>
                       <div className="text-sm font-semibold text-gray-900 leading-tight">{emp.name}</div>
                       <div className="text-xs text-gray-400 mt-0.5">{emp.email}</div>
-                    </div>
+                    </button>
                     {/* Score bar */}
                     <div className="w-28 hidden sm:block">
                       <ScoreBar score={emp.score} />
@@ -850,8 +851,15 @@ function AdminDashboard({ user, onLogout, onViewEmployee }) {
                             'bg-yellow-100 text-yellow-700'}`}>{p.label}</span>
                       ))}
                     </div>
-                    <span className="text-gray-300 text-lg">›</span>
-                  </button>
+                    {/* Edit / Delete buttons */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button onClick={() => setEditUser(emp)} title="Editar"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition text-sm">✏️</button>
+                      <button onClick={() => setDeleteUser(emp)} title="Eliminar"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition text-sm">🗑️</button>
+                      <button onClick={() => onViewEmployee(emp.id)} className="text-gray-300 text-lg pl-1">›</button>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
@@ -901,6 +909,8 @@ function AdminDashboard({ user, onLogout, onViewEmployee }) {
 
       </div>
       {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onAdded={refresh} />}
+      {editUser   && <EditUserModal employee={editUser} onClose={() => setEditUser(null)} onSaved={refresh} />}
+      {deleteUser && <DeleteUserModal employee={deleteUser} onClose={() => setDeleteUser(null)} onDeleted={refresh} />}
     </div>
   );
 }
@@ -951,6 +961,103 @@ function AddUserModal({ onClose, onAdded }) {
             </div>
           </form>
         }
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// EDIT USER MODAL
+// ═══════════════════════════════════════════════════════════
+function EditUserModal({ employee, onClose, onSaved }) {
+  const [form, setForm] = React.useState({ name: employee.name, email: employee.email, password: '' });
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [success, setSuccess] = React.useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      await api(`/api/admin/user/${employee.id}`, { method: 'PUT', body: form });
+      setSuccess(true); onSaved();
+      setTimeout(onClose, 1200);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={e => e.target === e.currentTarget && onClose()}>
+      <Card className="w-full max-w-sm p-6 fade-in">
+        <div className="text-base font-bold text-gray-900 mb-1">Editar empleado</div>
+        <div className="text-xs text-gray-400 mb-4">{employee.email}</div>
+        {success
+          ? <div className="text-center py-6 text-green-600 font-semibold">✓ Cambios guardados</div>
+          : <form onSubmit={submit} className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Nombre completo</label>
+              <input type="text" required value={form.name}
+                onChange={e => setForm(p => ({...p, name: e.target.value}))}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Email de trabajo</label>
+              <input type="email" required value={form.email}
+                onChange={e => setForm(p => ({...p, email: e.target.value}))}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Nueva contraseña <span className="text-gray-400 font-normal">(dejar vacío para no cambiar)</span></label>
+              <input type="text" placeholder="Nueva contraseña..." value={form.password}
+                onChange={e => setForm(p => ({...p, password: e.target.value}))}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
+            </div>
+            {error && <div className="text-red-600 text-xs bg-red-50 px-3 py-2 rounded-lg">{error}</div>}
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={onClose} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
+              <button type="submit" disabled={loading} className="flex-1 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-700 disabled:opacity-50">
+                {loading ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </form>
+        }
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// DELETE CONFIRM MODAL
+// ═══════════════════════════════════════════════════════════
+function DeleteUserModal({ employee, onClose, onDeleted }) {
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+
+  async function confirm() {
+    setLoading(true); setError('');
+    try {
+      await api(`/api/admin/user/${employee.id}`, { method: 'DELETE' });
+      onDeleted();
+      onClose();
+    } catch (e) { setError(e.message); setLoading(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={e => e.target === e.currentTarget && onClose()}>
+      <Card className="w-full max-w-sm p-6 fade-in">
+        <div className="text-base font-bold text-gray-900 mb-1">Eliminar empleado</div>
+        <div className="text-sm text-gray-500 mb-4">
+          ¿Seguro que quieres eliminar a <strong>{employee.name}</strong>?<br/>
+          <span className="text-red-500 text-xs">Se borrarán también todos sus formularios y datos históricos.</span>
+        </div>
+        {error && <div className="text-red-600 text-xs bg-red-50 px-3 py-2 rounded-lg mb-3">{error}</div>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
+          <button onClick={confirm} disabled={loading}
+            className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
+            {loading ? 'Eliminando...' : 'Sí, eliminar'}
+          </button>
+        </div>
       </Card>
     </div>
   );
