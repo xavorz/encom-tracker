@@ -166,7 +166,7 @@ function EmployeeHome({ user, onNavigate, onLogout }) {
   const days = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
   const today = new Date().getDay();
   const dayName = days[today];
-  const isFridayOrLater = today >= 5;
+  const isFridayOrLater = true; // Accesible cualquier día de la semana
 
   React.useEffect(() => {
     api('/api/me/status').then(setStatus).catch(console.error);
@@ -229,7 +229,10 @@ function EmployeeHome({ user, onNavigate, onLogout }) {
                         className="flex-shrink-0 bg-orange-500 text-white text-sm px-4 py-2 rounded-xl font-medium hover:bg-orange-600 transition">
                         Completar
                       </button>
-                    : <span className="text-sm text-gray-400 flex-shrink-0">Disponible el viernes</span>
+                    : <button onClick={() => onNavigate('friday')}
+                      className="flex-shrink-0 bg-orange-500 text-white text-sm px-4 py-2 rounded-xl font-medium hover:bg-orange-600 transition">
+                      Completar
+                    </button>
                 }
               </div>
             </Card>
