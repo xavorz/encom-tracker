@@ -2,14 +2,27 @@
 // Encom Weekly Performance Tracker — server.js
 // Zero external dependencies — uses only Node.js built-ins
 // ============================================================
+
+// ── Global error handlers (prevent silent crashes on Render) ─
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err);
+  // Don't exit — keep the server alive
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled promise rejection:', reason);
+  // Don't exit — keep the server alive
+});
+
 const http   = require('http');
 const crypto = require('crypto');
 const fs     = require('fs');
 const path   = require('path');
 const url    = require('url');
 
-const PORT       = process.env.PORT || 3000;
+const PORT       = parseInt(process.env.PORT, 10) || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'encom-tracker-2024-secret';
+
+console.log(`[BOOT] Node ${process.version} | PORT=${PORT} | NODE_ENV=${process.env.NODE_ENV || 'development'}`);
 
 // ── Database (JSON files) ────────────────────────────────────
 // DATA_DIR can be overridden via env var (useful for Render persistent disk)
@@ -314,6 +327,86 @@ route('GET', '/api/admin/alerts', async (req, res) => {
   respond(res, 200, alerts);
 });
 
+// GET /api/admin/export — CSV export with optional date filters
+// Query params: ?from=YYYY-MM-DD&to=YYYY-MM-DD  or  ?weeks=4  (default: all)
+route('GET', '/api/admin/export', async (req, res) => {
+  const user = getUser(req);
+  if (!user || user.role !== 'admin') return respond(res, 403, { error: 'Solo administradores' });
+
+  const parsed  = url.parse(req.url, true);
+  const { from, to, weeks } = parsed.query;
+
+  const employees = readDB('users').filter(u => u.role === 'employee');
+  const plans     = readDB('monday_plans');
+  const reviews   = readDB('friday_reviews');
+
+  // Collect all unique week starts
+  let allWeeks = [...new Set([
+    ...plans.map(p => p.week_start),
+    ...reviews.map(r => r.week_start),
+  ])].sort();
+
+  // Apply filters
+  if (from) allWeeks = allWeeks.filter(w => w >= from);
+  if (to)   allWeeks = allWeeks.filter(w => w <= to);
+  if (weeks && !from && !to) {
+    const n = parseInt(weeks, 10);
+    allWeeks = allWeeks.slice(-n);
+  }
+
+  // CSV header
+  const cols = [
+    'Semana','Empleado','Email',
+    'Tareas_Lunes','Claridad_Objetivos','Bloqueo_Anticipado','Importancia_Estrategica','Necesidades_Encom',
+    'Pct_Tareas_Completadas','Autopuntuacion_1_5','Bloqueos_Viernes','Incertidumbres','Logro_Principal','Animo_Proxima_Semana',
+    'Score_Composite_0_10','Plan_Enviado','Revision_Enviada'
+  ];
+
+  function esc(v) {
+    if (v == null || v === '') return '';
+    const s = String(v).replace(/\r?\n/g, ' | ').replace(/"/g, '""');
+    return s.includes(',') || s.includes('"') || s.includes(';') ? `"${s}"` : s;
+  }
+
+  const rows = [cols.join(',')];
+
+  for (const week of allWeeks) {
+    for (const emp of employees) {
+      const plan   = plans.find(p => p.user_id === emp.id && p.week_start === week)   || null;
+      const review = reviews.find(r => r.user_id === emp.id && r.week_start === week) || null;
+      const score  = calcComposite(plan, review);
+      rows.push([
+        esc(week), esc(emp.name), esc(emp.email),
+        esc(plan?.tasks),
+        esc(plan?.clarity_level),
+        esc(plan?.known_blockers),
+        esc(plan?.task_importance),
+        esc(plan?.needs_from_encom),
+        esc(review?.tasks_completed_pct),
+        esc(review?.performance_score),
+        esc(review?.blockers),
+        esc(review?.uncertainties),
+        esc(review?.achievements),
+        esc(review?.mood_next_week),
+        esc(score),
+        esc(plan ? 'Sí' : 'No'),
+        esc(review ? 'Sí' : 'No'),
+      ].join(','));
+    }
+  }
+
+  const csv = rows.join('\r\n');
+  const filename = `encom_tracker_${from || ''}${from && to ? '_' : ''}${to || ''}${weeks ? `ultimas${weeks}semanas` : ''}_${new Date().toISOString().split('T')[0]}.csv`;
+
+  res.writeHead(200, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Expose-Headers': 'Content-Disposition',
+  });
+  res.end('\uFEFF' + csv); // BOM for Excel UTF-8
+});
+
 // GET /api/health — Render health check
 route('GET', '/api/health', async (req, res) => {
   respond(res, 200, { status: 'ok', uptime: Math.round(process.uptime()) });
@@ -457,11 +550,13 @@ setInterval(() => {
 }, 60_000); // check every minute
 
 // ── Start ────────────────────────────────────────────────────
-server.listen(PORT, () => {
-  console.log('\n╔══════════════════════════════════════════╗');
-  console.log('║   🚀  Encom Tracker  →  http://localhost:' + PORT + '  ║');
-  console.log('╚══════════════════════════════════════════╝');
-  console.log(`📧 Email: ${emailCfg ? '✅ Configurado' : '⚠️  No configurado (logs en consola)'}`);
-  console.log('\nAdmin:     javier@encom.es  /  encom2024');
-  console.log('Empleados: [nombre]@encom.es  /  encom2024\n');
+server.on('error', (err) => {
+  console.error('[SERVER ERROR]', err);
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  const addr = server.address();
+  console.log(`\n[OK] Servidor escuchando en 0.0.0.0:${addr.port}`);
+  console.log(`[OK] Encom Tracker listo → puerto ${addr.port}`);
+  console.log(`[OK] Email: ${emailCfg ? 'Configurado' : 'No configurado'}`);
 });

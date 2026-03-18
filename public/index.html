@@ -613,6 +613,114 @@ function FridayForm({ user, onBack, onSuccess }) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// EXPORT PANEL
+// ═══════════════════════════════════════════════════════════
+function ExportPanel() {
+  const [mode, setMode]   = React.useState('all');   // 'all' | 'weeks' | 'range'
+  const [weeks, setWeeks] = React.useState('4');
+  const [from,  setFrom]  = React.useState('');
+  const [to,    setTo]    = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [msg, setMsg]     = React.useState('');
+
+  async function doExport() {
+    setLoading(true); setMsg('');
+    let qs = '';
+    if (mode === 'weeks') qs = `?weeks=${weeks}`;
+    else if (mode === 'range' && from) {
+      qs = `?from=${from}`;
+      if (to) qs += `&to=${to}`;
+    }
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/admin/export${qs}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Error al exportar');
+      const blob = await res.blob();
+      const cd   = res.headers.get('Content-Disposition') || '';
+      const match = cd.match(/filename="([^"]+)"/);
+      const name  = match ? match[1] : 'encom_export.csv';
+      const url   = URL.createObjectURL(blob);
+      const a     = document.createElement('a');
+      a.href = url; a.download = name; a.click();
+      URL.revokeObjectURL(url);
+      setMsg('✓ Descarga iniciada');
+    } catch (e) { setMsg('Error: ' + e.message); }
+    setLoading(false);
+  }
+
+  return (
+    <Card className="p-6 max-w-xl">
+      <div className="text-sm font-bold text-gray-800 mb-1">Exportar datos a CSV</div>
+      <div className="text-xs text-gray-400 mb-5">
+        El CSV incluye todos los formularios del equipo con puntuaciones calculadas.<br/>
+        Ideal para pegar a Claude y analizar patrones, rendimiento y tendencias.
+      </div>
+
+      {/* Mode selector */}
+      <div className="space-y-2 mb-5">
+        {[
+          { id: 'all',   label: 'Todos los datos' },
+          { id: 'weeks', label: 'Últimas semanas' },
+          { id: 'range', label: 'Rango de fechas' },
+        ].map(opt => (
+          <label key={opt.id} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition
+            ${mode === opt.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 hover:border-gray-200'}`}>
+            <input type="radio" name="mode" value={opt.id} checked={mode === opt.id}
+              onChange={() => setMode(opt.id)} className="accent-blue-600" />
+            <span className="text-sm font-medium text-gray-800">{opt.label}</span>
+          </label>
+        ))}
+      </div>
+
+      {/* Options per mode */}
+      {mode === 'weeks' && (
+        <div className="mb-5 fade-in">
+          <label className="block text-xs font-medium text-gray-600 mb-1.5">Número de semanas</label>
+          <select value={weeks} onChange={e => setWeeks(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none">
+            {[2,4,6,8,12,16,24,52].map(n => (
+              <option key={n} value={n}>Últimas {n} semanas</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {mode === 'range' && (
+        <div className="grid grid-cols-2 gap-3 mb-5 fade-in">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Desde (lunes de semana)</label>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Hasta (lunes de semana)</label>
+            <input type="date" value={to} onChange={e => setTo(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none" />
+          </div>
+        </div>
+      )}
+
+      <button onClick={doExport} disabled={loading}
+        className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 transition disabled:opacity-50 flex items-center justify-center gap-2">
+        {loading ? 'Generando...' : '⬇ Descargar CSV'}
+      </button>
+
+      {msg && (
+        <div className={`mt-3 text-sm text-center font-medium ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>
+          {msg}
+        </div>
+      )}
+
+      <div className="mt-4 bg-gray-50 rounded-xl p-3 text-xs text-gray-500 leading-relaxed">
+        <strong className="text-gray-700">Columnas incluidas:</strong> Semana · Empleado · Email · Tareas del lunes · Claridad · Bloqueos anticipados · Importancia estratégica · Necesidades · % Completado · Autopuntuación · Bloqueos del viernes · Incertidumbres · Logro principal · Ánimo próxima semana · Score compuesto (0–10)
+      </div>
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // ADMIN DASHBOARD
 // ═══════════════════════════════════════════════════════════
 function AdminDashboard({ user, onLogout, onViewEmployee }) {
@@ -694,7 +802,7 @@ function AdminDashboard({ user, onLogout, onViewEmployee }) {
 
         {/* Tabs */}
         <div className="flex gap-1 bg-gray-200 p-1 rounded-xl w-fit">
-          {[{id:'team',label:'Equipo'},{id:'alerts',label:`Alertas ${alerts.length > 0 ? `(${alerts.length})` : ''}`}].map(t => (
+          {[{id:'team',label:'Equipo'},{id:'alerts',label:`Alertas ${alerts.length > 0 ? `(${alerts.length})` : ''}`},{id:'export',label:'Exportar CSV'}].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition ${tab === t.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               {t.label}
@@ -788,8 +896,10 @@ function AdminDashboard({ user, onLogout, onViewEmployee }) {
             }
           </Card>
         )}
-      </div>
+        {/* Export tab */}
+        {tab === 'export' && <ExportPanel />}
 
+      </div>
       {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onAdded={refresh} />}
     </div>
   );
